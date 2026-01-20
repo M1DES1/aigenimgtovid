@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Generator Wideo ze Zdjęć</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/x-icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎬</text></svg>">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-video"></i> AI Generator Wideo</h1>
+            <p class="tagline">Prześlij zdjęcie, opisz akcję, a AI stworzy dla Ciebie wideo</p>
+        </header>
+
+        <main class="main-content">
+            <!-- Panel wprowadzania danych -->
+            <div class="input-panel">
+                <div class="card">
+                    <h2><i class="fas fa-upload"></i> Krok 1: Prześlij zdjęcie</h2>
+                    <div class="upload-area" id="uploadArea">
+                        <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                        <p>Przeciągnij i upuść zdjęcie tutaj lub kliknij, aby wybrać</p>
+                        <input type="file" id="imageInput" accept="image/*" hidden>
+                        <button class="btn" id="selectFileBtn">Wybierz plik</button>
+                        <p class="file-info">Obsługiwane formaty: JPG, PNG, WebP (maks. 5MB)</p>
+                    </div>
+                    
+                    <div class="preview-container" id="previewContainer">
+                        <h3>Podgląd zdjęcia:</h3>
+                        <div class="image-preview" id="imagePreview">
+                            <p>Brak zdjęcia</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2><i class="fas fa-keyboard"></i> Krok 2: Opisz akcję</h2>
+                    <div class="prompt-input">
+                        <label for="promptInput">Prompt (co ma się dziać na wideo?):</label>
+                        <textarea id="promptInput" rows="5" placeholder="Opisz szczegółowo, co ma się wydarzyć na wideo. Na przykład: 'Postać na zdjęciu idzie przez las, w tle widać magiczne światła, po chwili pojawia się smok i odlatuje w stronę zamku.'"></textarea>
+                        <div class="prompt-examples">
+                            <p><strong>Przykłady:</strong></p>
+                            <ul>
+                                <li>"Postać tańczy w deszczu, wokół latają kolorowe motyle"</li>
+                                <li>"Scena zmienia się w kosmos, postać unosi się wśród gwiazd"</li>
+                                <li>"Postać przechodzi przez portal do krainy fantasy"</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h2><i class="fas fa-sliders-h"></i> Krok 3: Ustawienia wideo</h2>
+                    <div class="video-settings">
+                        <div class="setting">
+                            <label for="duration">Długość wideo (sekundy):</label>
+                            <input type="range" id="duration" min="2" max="60" value="10">
+                            <span id="durationValue">10 s</span>
+                        </div>
+                        
+                        <div class="setting">
+                            <label for="style">Styl wideo:</label>
+                            <select id="style">
+                                <option value="realistic">Realistyczny</option>
+                                <option value="animated">Animowany</option>
+                                <option value="fantasy">Fantasy</option>
+                                <option value="cinematic">Filmowy</option>
+                                <option value="cyberpunk">Cyberpunk</option>
+                            </select>
+                        </div>
+                        
+                        <div class="setting">
+                            <label for="motion">Intensywność ruchu:</label>
+                            <input type="range" id="motion" min="1" max="10" value="5">
+                            <span id="motionValue">5</span>
+                        </div>
+                    </div>
+                </div>
+
+                <button class="btn generate-btn" id="generateBtn">
+                    <i class="fas fa-magic"></i> Generuj Wideo
+                </button>
+            </div>
+
+            <!-- Panel wynikowy -->
+            <div class="output-panel">
+                <div class="card">
+                    <h2><i class="fas fa-film"></i> Wygenerowane wideo</h2>
+                    
+                    <div class="status-container">
+                        <div class="status-message" id="statusMessage">
+                            <p>Wprowadź dane i kliknij "Generuj Wideo"</p>
+                        </div>
+                        
+                        <div class="progress-container" id="progressContainer">
+                            <div class="progress-bar" id="progressBar"></div>
+                            <div class="progress-text" id="progressText">0%</div>
+                        </div>
+                    </div>
+                    
+                    <div class="video-output" id="videoOutput">
+                        <div class="video-placeholder">
+                            <i class="fas fa-video"></i>
+                            <p>Tutaj pojawi się wygenerowane wideo</p>
+                        </div>
+                    </div>
+                    
+                    <div class="video-info" id="videoInfo">
+                        <p><i class="fas fa-info-circle"></i> Po wygenerowaniu wideo będziesz mógł je pobrać lub udostępnić</p>
+                    </div>
+                    
+                    <div class="action-buttons" id="actionButtons">
+                        <button class="btn action-btn" id="downloadBtn" disabled>
+                            <i class="fas fa-download"></i> Pobierz Wideo
+                        </button>
+                        <button class="btn action-btn" id="shareBtn" disabled>
+                            <i class="fas fa-share-alt"></i> Udostępnij
+                        </button>
+                        <button class="btn action-btn" id="newBtn">
+                            <i class="fas fa-redo"></i> Nowe Wideo
+                        </button>
+                    </div>
+                    
+                    <div class="history-section">
+                        <h3><i class="fas fa-history"></i> Ostatnie generowania</h3>
+                        <div class="history-list" id="historyList">
+                            <p class="empty-history">Brak historii generowań</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <p>AI Generator Wideo &copy; 2023 | Stworzone z <i class="fas fa-heart"></i> dla kreatywnych umysłów</p>
+            <p class="disclaimer">Ta aplikacja jest demonstracją konceptu. Do rzeczywistego generowania wideo z AI potrzebne jest podłączenie do odpowiedniego API (np. Runway, Pika Labs, Stable Video Diffusion).</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
