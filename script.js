@@ -24,19 +24,15 @@ document.addEventListener('DOMContentLoaded', function() {
     const actionButtons = document.getElementById('actionButtons');
     const historyList = document.getElementById('historyList');
     
-    // Konfiguracja API
-    const API_CONFIG = {
-        BASE_URL: 'https://image.pollinations.ai',
-        API_KEY: 'pollo_D8ws2mwIeAewNefuWczRM1Ra8LpauqvUtv85cayzu8UF',
-        MODEL: 'flux', // Model do generowania obrazów
-        VIDEO_MODEL: 'zeroscope-v2-xl' // Model do generowania wideo
-    };
+    // URL Twojego backendu na Render
+    const BACKEND_URL = 'https://aigenimgtovid.onrender.com';
     
     // Zmienne stanu aplikacji
     let uploadedImage = null;
     let generatedVideo = null;
     let generationHistory = [];
     let currentGenerationId = null;
+    let statusCheckInterval = null;
     
     // Obsługa wybierania pliku
     selectFileBtn.addEventListener('click', () => {
@@ -82,7 +78,6 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Funkcja do obsługi przesłanego obrazu
     function handleImageUpload(file) {
-        // Sprawdzenie rozmiaru pliku (max 5MB)
         if (file.size > 5 * 1024 * 1024) {
             showStatus('Plik jest zbyt duży. Maksymalny rozmiar to 5MB.', 'error');
             return;
@@ -97,13 +92,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 file: file
             };
             
-            // Wyświetl podgląd
             imagePreview.innerHTML = `<img src="${uploadedImage.src}" alt="Podgląd przesłanego zdjęcia">`;
             previewContainer.style.display = 'block';
             
             showStatus('Zdjęcie zostało przesłane pomyślnie!', 'success');
             
-            // Automatyczne uzupełnienie promptu na podstawie nazwy pliku
             if (promptInput.value === '') {
                 const fileNameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
                 promptInput.value = `Animacja przedstawiająca ${fileNameWithoutExt.replace(/[_-]/g, ' ')} w ruchu.`;
@@ -123,7 +116,6 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Obsługa generowania wideo
     generateBtn.addEventListener('click', function() {
-        // Walidacja danych wejściowych
         if (!uploadedImage) {
             showStatus('Proszę najpierw przesłać zdjęcie!', 'error');
             return;
@@ -135,23 +127,19 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         
-        // Rozpocznij proces generowania
         startGeneration();
     });
     
     // Funkcja rozpoczynająca generowanie wideo
     async function startGeneration() {
-        // Zablokuj przycisk generowania
         generateBtn.disabled = true;
         generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generowanie...';
         generateBtn.classList.add('generating');
         
-        // Pokaż pasek postępu
         progressContainer.style.display = 'block';
         progressBar.style.width = '0%';
         progressText.textContent = '0%';
         
-        // Zresetuj wyjście wideo
         videoOutput.innerHTML = `
             <div class="video-placeholder">
                 <i class="fas fa-spinner fa-spin"></i>
@@ -159,168 +147,140 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
         `;
         
-        // Ustaw unikalny ID dla tej generacji
         currentGenerationId = Date.now();
         
         try {
-            // Krok 1: Prześlij obraz i uzyskaj URL
-            showStatus('Przesyłanie obrazu do API...', 'info');
             updateProgress(10);
+            showStatus('Wysyłam żądanie do serwera...', 'info');
             
-            const imageUrl = await uploadImageToAPI();
+            const videoData = await generateVideoWithAPI(promptInput.value.trim(), uploadedImage.src);
             
-            // Krok 2: Przygotuj prompt z obrazem
-            updateProgress(30);
-            showStatus('Przygotowuję prompt z obrazem...', 'info');
+            updateProgress(70);
+            showStatus('Otrzymano ID wideo, sprawdzam status...', 'info');
             
-            const fullPrompt = await prepareImagePrompt(imageUrl);
-            
-            // Krok 3: Generuj wideo
-            updateProgress(50);
-            showStatus('Rozpoczynam generowanie wideo...', 'info');
-            
-            const videoData = await generateVideoWithAPI(fullPrompt);
-            
-            // Krok 4: Przetwarzanie wideo
-            updateProgress(80);
-            showStatus('Przetwarzam wygenerowane wideo...', 'info');
-            
-            await processGeneratedVideo(videoData);
-            
-            // Krok 5: Zakończ
-            updateProgress(100);
-            finishGeneration();
+            // Rozpocznij sprawdzanie statusu
+            await pollVideoStatus(videoData.video_id);
             
         } catch (error) {
             console.error('Błąd podczas generowania:', error);
-            showStatus(`Błąd podczas generowania: ${error.message}`, 'error');
+            showStatus(`Błąd: ${error.message}`, 'error');
             resetGenerationState();
         }
     }
     
-    // Funkcja do przesyłania obrazu
-    async function uploadImageToAPI() {
-        // W rzeczywistości musiałbyś przesłać obraz do serwera,
-        // ponieważ Pollinations API wymaga URL do obrazu
-        
-        // Na potrzeby demo, tworzymy Data URL
-        return uploadedImage.src;
-        
-        // W rzeczywistej implementacji:
-        // 1. Prześlij obraz do swojego serwera
-        // 2. Uzyskaj publiczny URL
-        // 3. Użyj tego URL w API Pollinations
-    }
-    
-    // Przygotuj prompt z obrazem
-    async function prepareImagePrompt(imageUrl) {
-        const basePrompt = promptInput.value.trim();
-        const style = styleSelect.options[styleSelect.selectedIndex].text;
-        const motion = motionSlider.value;
-        
-        // Dodaj parametry stylu i ruchu do promptu
-        let enhancedPrompt = `${basePrompt}. Styl: ${style}. Intensywność ruchu: ${motion}/10.`;
-        
-        // Dodaj parametry techniczne dla lepszego wideo
-        enhancedPrompt += ` cinematic, high quality, smooth motion, detailed`;
-        
-        return enhancedPrompt;
-    }
-    
-    // Generuj wideo przy użyciu API Pollinations
-    async function generateVideoWithAPI(prompt) {
-        // Pollinations API dla wideo
-        // Uwaga: Pollinations API głównie generuje obrazy, dla wideo może być potrzebne inne API
-        // Na razie używamy jako przykładu
-        
-        const duration = durationSlider.value;
-        const width = 512;
-        const height = 512;
-        
-        // Symulacja czasu generowania
-        await simulateGenerationTime(duration);
-        
-        // W rzeczywistości tutaj byłoby wywołanie API:
-        // const response = await fetch(`${API_CONFIG.BASE_URL}/video`, {
-        //     method: 'POST',
-        //     headers: {
-        //         'Authorization': `Bearer ${API_CONFIG.API_KEY}`,
-        //         'Content-Type': 'application/json'
-        //     },
-        //     body: JSON.stringify({
-        //         prompt: prompt,
-        //         duration: parseInt(duration),
-        //         width: width,
-        //         height: height,
-        //         model: API_CONFIG.VIDEO_MODEL
-        //     })
-        // });
-        // 
-        // if (!response.ok) {
-        //     throw new Error('Błąd API');
-        // }
-        // 
-        // return await response.json();
-        
-        // Na potrzeby demo, zwracamy przykładowe dane
-        return {
-            videoUrl: `https://pollinations.ai/p/${encodeURIComponent(prompt)}?width=${width}&height=${height}&seed=${currentGenerationId}`,
+    // Generuj wideo przez Twój backend
+    async function generateVideoWithAPI(prompt, imageData) {
+        const requestData = {
+            imageData: imageData,
             prompt: prompt,
-            duration: duration
-        };
-    }
-    
-    // Symuluj czas generowania
-    async function simulateGenerationTime(duration) {
-        const baseTime = parseInt(duration) * 1000; // 1 sekunda na sekundę wideo
-        const randomExtra = Math.random() * 5000; // Dodatkowe 0-5 sekund
-        
-        await new Promise(resolve => setTimeout(resolve, baseTime + randomExtra));
-    }
-    
-    // Przetwórz wygenerowane wideo
-    async function processGeneratedVideo(videoData) {
-        // Tutaj można dodać dodatkowe przetwarzanie wideo
-        // Na przykład: kompresja, dodanie efektów, konwersja formatu
-        
-        generatedVideo = {
-            id: currentGenerationId,
-            url: videoData.videoUrl,
-            prompt: videoData.prompt,
-            duration: videoData.duration,
-            style: styleSelect.options[styleSelect.selectedIndex].text,
-            timestamp: new Date().toLocaleString(),
-            data: videoData
+            duration: parseInt(durationSlider.value),
+            motion: parseInt(motionSlider.value),
+            style: styleSelect.value
         };
         
-        // Pokaż podgląd wideo
-        await displayGeneratedVideo(videoData.videoUrl);
+        try {
+            const response = await fetch(`${BACKEND_URL}/api/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestData)
+            });
+            
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || `Błąd serwera: ${response.status}`);
+            }
+            
+            const result = await response.json();
+            return result;
+            
+        } catch (error) {
+            console.error('Błąd komunikacji z backendem:', error);
+            throw new Error('Nie udało się połączyć z serwerem.');
+        }
+    }
+    
+    // Sprawdzanie statusu wideo
+    async function pollVideoStatus(videoId) {
+        return new Promise((resolve, reject) => {
+            let attempts = 0;
+            const maxAttempts = 60; // Maksymalnie 5 minut (60 * 5 sekund)
+            
+            statusCheckInterval = setInterval(async () => {
+                attempts++;
+                
+                try {
+                    const response = await fetch(`${BACKEND_URL}/api/status/${videoId}`);
+                    
+                    if (!response.ok) {
+                        clearInterval(statusCheckInterval);
+                        reject(new Error('Błąd sprawdzania statusu.'));
+                        return;
+                    }
+                    
+                    const statusData = await response.json();
+                    
+                    // Aktualizuj postęp na podstawie statusu
+                    if (statusData.status === 'processing') {
+                        const progress = 70 + Math.min(20, (attempts / maxAttempts) * 20);
+                        updateProgress(progress);
+                        showStatus(`Przetwarzanie wideo... (próba ${attempts}/${maxAttempts})`, 'info');
+                    }
+                    else if (statusData.status === 'completed') {
+                        clearInterval(statusCheckInterval);
+                        updateProgress(100);
+                        
+                        generatedVideo = {
+                            id: currentGenerationId,
+                            url: statusData.video_url,
+                            prompt: promptInput.value.trim(),
+                            duration: durationSlider.value,
+                            style: styleSelect.options[styleSelect.selectedIndex].text,
+                            timestamp: new Date().toLocaleString(),
+                            videoId: videoId
+                        };
+                        
+                        // Wyświetl wideo
+                        displayGeneratedVideo(statusData.video_url);
+                        
+                        // Dodaj do historii
+                        addToHistory(generatedVideo);
+                        
+                        // Aktywuj przyciski
+                        downloadBtn.disabled = false;
+                        shareBtn.disabled = false;
+                        
+                        showStatus('Wideo zostało wygenerowane pomyślnie!', 'success');
+                        resolve();
+                    }
+                    else if (statusData.status === 'failed') {
+                        clearInterval(statusCheckInterval);
+                        reject(new Error('Generowanie wideo nie powiodło się.'));
+                    }
+                    
+                    // Przekroczono limit prób
+                    if (attempts >= maxAttempts) {
+                        clearInterval(statusCheckInterval);
+                        reject(new Error('Przekroczono czas oczekiwania na wideo.'));
+                    }
+                    
+                } catch (error) {
+                    clearInterval(statusCheckInterval);
+                    reject(error);
+                }
+            }, 5000); // Sprawdzaj co 5 sekund
+        });
     }
     
     // Wyświetl wygenerowane wideo
-    async function displayGeneratedVideo(videoUrl) {
-        // W rzeczywistości Pollinations zwraca obraz lub GIF dla wideo
-        // Dla celów demo używamy przykładowego wideo
-        
-        const actualVideoUrl = `https://pollinations.ai/p/${encodeURIComponent(promptInput.value)}?width=512&height=288&seed=${currentGenerationId}&model=zeroscope`;
-        
+    function displayGeneratedVideo(videoUrl) {
         videoOutput.innerHTML = `
             <div class="video-container">
-                <div style="background: rgba(0,0,0,0.3); padding: 20px; border-radius: 10px; margin-bottom: 15px;">
-                    <p style="color: #4cc9f0; margin-bottom: 10px;"><i class="fas fa-info-circle"></i> Uwaga: Pollinations API może wymagać dodatkowej konfiguracji dla pełnej funkcjonalności wideo.</p>
-                    <p style="font-size: 0.9rem;">Wygenerowany prompt został wysłany do API. Oto przykładowy wynik:</p>
-                </div>
-                <div style="text-align: center; margin: 20px 0;">
-                    <a href="${actualVideoUrl}" target="_blank" style="color: #4cc9f0; text-decoration: none;">
-                        <i class="fas fa-external-link-alt"></i> Zobacz wygenerowany kontent na Pollinations.ai
-                    </a>
-                </div>
-                <video controls style="width:100%; border-radius:10px;">
-                    <source src="https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4" type="video/mp4">
-                    Twoja przeglądarka nie obsługuje odtwarzacza wideo.
+                <video controls autoplay style="width:100%; border-radius:10px;">
+                    <source src="${videoUrl}" type="video/mp4">
+                    Twoja przeglądarka nie obsługuje wideo.
                 </video>
-                <p style="text-align: center; margin-top: 10px; color: #a5b4fc; font-size: 0.9rem;">
-                    <i class="fas fa-lightbulb"></i> W rzeczywistej implementacji tutaj pojawiłoby się wideo wygenerowane przez API
+                <p style="text-align: center; margin-top: 10px; color: #a5b4fc;">
+                    <i class="fas fa-check-circle"></i> Wideo gotowe do pobrania
                 </p>
             </div>
         `;
@@ -332,43 +292,9 @@ document.addEventListener('DOMContentLoaded', function() {
         progressText.textContent = `${Math.round(percent)}%`;
     }
     
-    // Funkcja kończąca proces generowania
-    function finishGeneration() {
-        // Przywróć przycisk generowania
-        generateBtn.disabled = false;
-        generateBtn.innerHTML = '<i class="fas fa-magic"></i> Generuj Wideo';
-        generateBtn.classList.remove('generating');
-        
-        // Ukryj pasek postępu
-        setTimeout(() => {
-            progressContainer.style.display = 'none';
-        }, 1000);
-        
-        // Zaktualizuj informacje o wideo
-        const duration = durationSlider.value;
-        const style = styleSelect.options[styleSelect.selectedIndex].text;
-        
-        videoInfo.innerHTML = `
-            <p><i class="fas fa-info-circle"></i> Wygenerowano wideo (${duration}s) w stylu ${style} przy użyciu Pollinations API</p>
-            <p style="margin-top: 8px; font-size: 0.9rem;"><i class="fas fa-key"></i> Użyto klucza API: ${API_CONFIG.API_KEY.substring(0, 8)}...</p>
-        `;
-        
-        // Aktywuj przyciski akcji
-        downloadBtn.disabled = false;
-        shareBtn.disabled = false;
-        
-        // Dodaj do historii
-        addToHistory(generatedVideo);
-        
-        // Pokaż sukces
-        showStatus('Wideo zostało wygenerowane pomyślnie przy użyciu Pollinations AI API!', 'success');
-        
-        // Przewiń do sekcji wideo
-        videoOutput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-    
     // Resetuj stan generowania
     function resetGenerationState() {
+        if (statusCheckInterval) clearInterval(statusCheckInterval);
         generateBtn.disabled = false;
         generateBtn.innerHTML = '<i class="fas fa-magic"></i> Generuj Wideo';
         generateBtn.classList.remove('generating');
@@ -377,39 +303,31 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Obsługa przycisku pobierania
     downloadBtn.addEventListener('click', function() {
-        if (generatedVideo) {
-            showStatus('Przygotowywanie pobierania wideo...', 'info');
+        if (generatedVideo && generatedVideo.url) {
+            const link = document.createElement('a');
+            link.href = generatedVideo.url;
+            link.download = `ai-wideo-${generatedVideo.id}.mp4`;
+            link.target = '_blank';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
             
-            // W rzeczywistości tutaj byłoby pobieranie z serwera
-            setTimeout(() => {
-                showStatus('Wideo zostało pobrane pomyślnie!', 'success');
-                
-                // Symulacja pobierania
-                const link = document.createElement('a');
-                link.href = generatedVideo.url;
-                link.download = `ai-wideo-${generatedVideo.id}.mp4`;
-                link.target = '_blank';
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-            }, 1000);
+            showStatus('Rozpoczęto pobieranie wideo!', 'success');
         }
     });
     
     // Obsługa przycisku udostępniania
     shareBtn.addEventListener('click', function() {
-        if (generatedVideo) {
+        if (generatedVideo && generatedVideo.url) {
             if (navigator.share) {
-                // Udostępnianie przez Web Share API
                 navigator.share({
-                    title: 'Moje wygenerowane wideo AI z Pollinations',
+                    title: 'Moje wygenerowane wideo AI',
                     text: `Wygenerowano z promptu: ${generatedVideo.prompt.substring(0, 100)}...`,
                     url: generatedVideo.url,
                 })
                 .then(() => showStatus('Wideo udostępnione pomyślnie!', 'success'))
                 .catch(error => showStatus('Udostępnianie nie powiodło się.', 'error'));
             } else {
-                // Alternatywa dla przeglądarek bez Web Share API
                 navigator.clipboard.writeText(generatedVideo.url)
                     .then(() => showStatus('Link do wideo skopiowany do schowka!', 'success'))
                     .catch(() => showStatus('Nie udało się skopiować linku.', 'error'));
@@ -419,7 +337,8 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Obsługa przycisku nowego wideo
     newBtn.addEventListener('click', function() {
-        // Resetuj formularz
+        if (statusCheckInterval) clearInterval(statusCheckInterval);
+        
         promptInput.value = '';
         durationSlider.value = 10;
         durationValue.textContent = '10 s';
@@ -427,7 +346,6 @@ document.addEventListener('DOMContentLoaded', function() {
         motionValue.textContent = '5';
         styleSelect.value = 'realistic';
         
-        // Resetuj podgląd wideo
         videoOutput.innerHTML = `
             <div class="video-placeholder">
                 <i class="fas fa-video"></i>
@@ -435,19 +353,15 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
         `;
         
-        // Zresetuj informacje o wideo
         videoInfo.innerHTML = `
             <p><i class="fas fa-info-circle"></i> Po wygenerowaniu wideo będziesz mógł je pobrać lub udostępnić</p>
         `;
         
-        // Wyłącz przyciski akcji
         downloadBtn.disabled = true;
         shareBtn.disabled = true;
         
-        // Zresetuj status
         showStatus('Wprowadź dane i kliknij "Generuj Wideo"', 'info');
         
-        // Przewiń do góry
         document.querySelector('.input-panel').scrollIntoView({ behavior: 'smooth' });
     });
     
@@ -465,35 +379,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 icon = 'exclamation-circle';
                 color = '#f87171';
                 break;
-            case 'warning':
-                icon = 'exclamation-triangle';
-                color = '#fbbf24';
-                break;
         }
         
         statusMessage.innerHTML = `<p><i class="fas fa-${icon}" style="color:${color}; margin-right:8px;"></i> ${message}</p>`;
-        
-        // Automatyczne ukrywanie komunikatów sukcesu po 5 sekundach
-        if (type === 'success') {
-            setTimeout(() => {
-                if (statusMessage.innerHTML.includes(message)) {
-                    statusMessage.innerHTML = '<p>Wprowadź dane i kliknij "Generuj Wideo"</p>';
-                }
-            }, 5000);
-        }
     }
     
     // Funkcja dodająca wideo do historii
     function addToHistory(video) {
-        // Dodaj na początek tablicy
         generationHistory.unshift(video);
-        
-        // Ogranicz do 5 ostatnich pozycji
         if (generationHistory.length > 5) {
             generationHistory.pop();
         }
-        
-        // Zaktualizuj listę historii
         updateHistoryList();
     }
     
@@ -515,7 +411,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <h4>${video.prompt.substring(0, 40)}${video.prompt.length > 40 ? '...' : ''}</h4>
                         <p>${video.duration}s • ${video.style} • ${video.timestamp}</p>
                         <p style="color: #4cc9f0; font-size: 0.7rem; margin-top: 3px;">
-                            <i class="fas fa-key"></i> Pollinations API
+                            <i class="fas fa-server"></i> HeyGen API
                         </p>
                     </div>
                 </div>
@@ -546,32 +442,5 @@ document.addEventListener('DOMContentLoaded', function() {
     // Inicjalizacja historii
     updateHistoryList();
     
-    // Informacja o gotowości aplikacji
-    console.log("AI Video Generator został załadowany. Aplikacja jest gotowa do użycia z Pollinations API!");
-    console.log("Klucz API:", API_CONFIG.API_KEY);
-    
-    // Dodanie obsługi klawisza Enter w promptcie
-    promptInput.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' && e.ctrlKey) {
-            generateBtn.click();
-        }
-    });
-    
-    // Test połączenia z API (opcjonalnie)
-    async function testAPIConnection() {
-        try {
-            console.log("Testowanie połączenia z Pollinations API...");
-            
-            // Możesz dodać tutaj prosty test połączenia
-            // const testUrl = `${API_CONFIG.BASE_URL}/ping`;
-            // const response = await fetch(testUrl);
-            
-            console.log("Połączenie z API gotowe");
-        } catch (error) {
-            console.warn("Uwaga: Problem z połączeniem API", error);
-        }
-    }
-    
-    // Uruchom test połączenia po załadowaniu
-    setTimeout(testAPIConnection, 1000);
+    console.log("AI Video Generator został załadowany. Backend URL:", BACKEND_URL);
 });
