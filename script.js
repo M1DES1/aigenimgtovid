@@ -89,7 +89,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 src: e.target.result,
                 name: file.name,
                 size: (file.size / (1024*1024)).toFixed(2) + ' MB',
-                file: file
+                file: file,
+                base64: e.target.result.split(',')[1] // Tylko dane base64 bez nagłówka
             };
             
             imagePreview.innerHTML = `<img src="${uploadedImage.src}" alt="Podgląd przesłanego zdjęcia">`;
@@ -99,7 +100,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             if (promptInput.value === '') {
                 const fileNameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
-                promptInput.value = `Animacja przedstawiająca ${fileNameWithoutExt.replace(/[_-]/g, ' ')} w ruchu.`;
+                promptInput.value = `Cześć! Jestem ${fileNameWithoutExt.replace(/[_-]/g, ' ')}.`;
             }
         };
         reader.readAsDataURL(file);
@@ -122,7 +123,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         
         if (!promptInput.value.trim()) {
-            showStatus('Proszę wpisać prompt opisujący akcję na wideo!', 'error');
+            showStatus('Proszę wpisać tekst, który ma wypowiedzieć postać!', 'error');
             promptInput.focus();
             return;
         }
@@ -151,34 +152,59 @@ document.addEventListener('DOMContentLoaded', function() {
         
         try {
             updateProgress(10);
-            showStatus('Wysyłam żądanie do serwera...', 'info');
+            showStatus('Rozpoczynam tworzenie awatara...', 'info');
             
-            const videoData = await generateVideoWithAPI(promptInput.value.trim(), uploadedImage.src);
+            // Sprawdź czy mamy aktywne API HeyGen
+            const testResponse = await fetch(`${BACKEND_URL}/api/test`);
+            const testData = await testResponse.json();
             
-            updateProgress(70);
-            showStatus('Otrzymano ID wideo, sprawdzam status...', 'info');
+            if (!testData.success) {
+                throw new Error('Błąd połączenia z HeyGen API. Sprawdź klucz API.');
+            }
             
-            // Rozpocznij sprawdzanie statusu
-            await pollVideoStatus(videoData.video_id);
+            updateProgress(20);
+            showStatus('Wysyłam żądanie generowania wideo...', 'info');
+            
+            // 1. SPRÓBUJ UŻYĆ AVATAR Z DODANYCH ZDJĘCIEM
+            const videoData = await generateVideoWithCustomAvatar();
+            
+            if (videoData && videoData.video_id) {
+                // Kontynuuj ze sprawdzaniem statusu
+                updateProgress(40);
+                showStatus('Rozpoczęto generowanie wideo. ID: ' + videoData.video_id, 'success');
+                
+                // Rozpocznij sprawdzanie statusu
+                await pollVideoStatus(videoData.video_id);
+            } else {
+                // Jeśli nie udało się, użyj DEMO z awatarem
+                await useDemoAvatarFallback();
+            }
             
         } catch (error) {
             console.error('Błąd podczas generowania:', error);
-            showStatus(`Błąd: ${error.message}`, 'error');
-            resetGenerationState();
+            
+            // Próbuj użyć fallback demo
+            try {
+                showStatus('Używam awatara demo...', 'warning');
+                await useDemoAvatarFallback();
+            } catch (fallbackError) {
+                showStatus(`Błąd: ${error.message}`, 'error');
+                resetGenerationState();
+            }
         }
     }
     
-    // Generuj wideo przez Twój backend
-    async function generateVideoWithAPI(prompt, imageData) {
-        const requestData = {
-            imageData: imageData,
-            prompt: prompt,
-            duration: parseInt(durationSlider.value),
-            motion: parseInt(motionSlider.value),
-            style: styleSelect.value
-        };
-        
+    // Opcja 1: Spróbuj użyć awatara z przesłanym zdjęciem
+    async function generateVideoWithCustomAvatar() {
         try {
+            const requestData = {
+                prompt: promptInput.value.trim(),
+                // Użyj awatara, który obsługuje zdjęcia (jeśli taki masz)
+                avatarId: "video_avatar_001", // To może wymagać specjalnej subskrypcji
+                voiceId: getVoiceFromStyle(styleSelect.value),
+                dimension: "portrait"
+            };
+            
             const response = await fetch(`${BACKEND_URL}/api/generate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -186,24 +212,68 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             
             if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || `Błąd serwera: ${response.status}`);
+                throw new Error(`Błąd serwera: ${response.status}`);
             }
             
-            const result = await response.json();
-            return result;
+            return await response.json();
             
         } catch (error) {
-            console.error('Błąd komunikacji z backendem:', error);
-            throw new Error('Nie udało się połączyć z serwerem.');
+            console.warn('Nie udało się użyć custom avatar:', error.message);
+            return null;
         }
+    }
+    
+    // Opcja 2: Użyj gotowego awatara jako fallback
+    async function useDemoAvatarFallback() {
+        updateProgress(50);
+        showStatus('Używam awatara demo Abigail...', 'info');
+        
+        const requestData = {
+            prompt: promptInput.value.trim(),
+            avatarId: "Abigail_expressive_2024112501", // Awatar z Twojej listy
+            voiceId: getVoiceFromStyle(styleSelect.value),
+            dimension: "portrait",
+            testMode: true
+        };
+        
+        const response = await fetch(`${BACKEND_URL}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestData)
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `Błąd: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        if (result.video_id) {
+            updateProgress(70);
+            await pollVideoStatus(result.video_id);
+        } else {
+            throw new Error('Nie otrzymano video_id z serwera');
+        }
+    }
+    
+    // Funkcja mapująca styl na głos
+    function getVoiceFromStyle(style) {
+        const voiceMap = {
+            'realistic': 'Rachel',
+            'cartoon': 'Sarah',
+            'anime': 'Emma',
+            'fantasy': 'David',
+            'cyberpunk': 'Ethan'
+        };
+        return voiceMap[style] || 'Rachel';
     }
     
     // Sprawdzanie statusu wideo
     async function pollVideoStatus(videoId) {
         return new Promise((resolve, reject) => {
             let attempts = 0;
-            const maxAttempts = 60; // Maksymalnie 5 minut (60 * 5 sekund)
+            const maxAttempts = 120; // Maksymalnie 10 minut (120 * 5 sekund)
             
             statusCheckInterval = setInterval(async () => {
                 attempts++;
@@ -212,18 +282,20 @@ document.addEventListener('DOMContentLoaded', function() {
                     const response = await fetch(`${BACKEND_URL}/api/status/${videoId}`);
                     
                     if (!response.ok) {
-                        clearInterval(statusCheckInterval);
-                        reject(new Error('Błąd sprawdzania statusu.'));
-                        return;
+                        throw new Error(`Błąd HTTP: ${response.status}`);
                     }
                     
                     const statusData = await response.json();
                     
-                    // Aktualizuj postęp na podstawie statusu
-                    if (statusData.status === 'processing') {
-                        const progress = 70 + Math.min(20, (attempts / maxAttempts) * 20);
+                    if (!statusData.success && statusData.error) {
+                        throw new Error(statusData.error);
+                    }
+                    
+                    // Aktualizuj postęp
+                    if (statusData.status === 'processing' || statusData.status === 'pending') {
+                        const progress = 70 + Math.min(25, (attempts / maxAttempts) * 25);
                         updateProgress(progress);
-                        showStatus(`Przetwarzanie wideo... (próba ${attempts}/${maxAttempts})`, 'info');
+                        showStatus(`Przetwarzanie wideo... (${attempts}/${maxAttempts})`, 'info');
                     }
                     else if (statusData.status === 'completed') {
                         clearInterval(statusCheckInterval);
@@ -236,7 +308,8 @@ document.addEventListener('DOMContentLoaded', function() {
                             duration: durationSlider.value,
                             style: styleSelect.options[styleSelect.selectedIndex].text,
                             timestamp: new Date().toLocaleString(),
-                            videoId: videoId
+                            videoId: videoId,
+                            thumbnail: statusData.thumbnail_url
                         };
                         
                         // Wyświetl wideo
@@ -254,13 +327,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     else if (statusData.status === 'failed') {
                         clearInterval(statusCheckInterval);
-                        reject(new Error('Generowanie wideo nie powiodło się.'));
+                        reject(new Error('Generowanie wideo nie powiodło się: ' + (statusData.error_message || 'Nieznany błąd')));
                     }
                     
                     // Przekroczono limit prób
                     if (attempts >= maxAttempts) {
                         clearInterval(statusCheckInterval);
-                        reject(new Error('Przekroczono czas oczekiwania na wideo.'));
+                        reject(new Error('Przekroczono czas oczekiwania na wideo. Proszę spróbować ponownie.'));
                     }
                     
                 } catch (error) {
@@ -275,15 +348,24 @@ document.addEventListener('DOMContentLoaded', function() {
     function displayGeneratedVideo(videoUrl) {
         videoOutput.innerHTML = `
             <div class="video-container">
-                <video controls autoplay style="width:100%; border-radius:10px;">
+                <video controls autoplay style="width:100%; border-radius:10px; max-height:500px;">
                     <source src="${videoUrl}" type="video/mp4">
                     Twoja przeglądarka nie obsługuje wideo.
                 </video>
-                <p style="text-align: center; margin-top: 10px; color: #a5b4fc;">
-                    <i class="fas fa-check-circle"></i> Wideo gotowe do pobrania
-                </p>
+                <div style="text-align: center; margin-top: 10px; color: #a5b4fc;">
+                    <i class="fas fa-check-circle"></i> Wideo gotowe!
+                    <p style="font-size: 0.8rem; margin-top: 5px; color: #94a3b8;">
+                        Czas generowania: ${new Date().toLocaleTimeString()}
+                    </p>
+                </div>
             </div>
         `;
+        
+        // Automatycznie odtwarzaj wideo
+        const videoElement = videoOutput.querySelector('video');
+        if (videoElement) {
+            videoElement.play().catch(e => console.log('Autoplay blocked:', e));
+        }
     }
     
     // Aktualizuj postęp
@@ -306,8 +388,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (generatedVideo && generatedVideo.url) {
             const link = document.createElement('a');
             link.href = generatedVideo.url;
-            link.download = `ai-wideo-${generatedVideo.id}.mp4`;
+            link.download = `ai-video-${generatedVideo.id}.mp4`;
             link.target = '_blank';
+            link.style.display = 'none';
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -322,18 +405,35 @@ document.addEventListener('DOMContentLoaded', function() {
             if (navigator.share) {
                 navigator.share({
                     title: 'Moje wygenerowane wideo AI',
-                    text: `Wygenerowano z promptu: ${generatedVideo.prompt.substring(0, 100)}...`,
+                    text: `"${generatedVideo.prompt.substring(0, 50)}..."`,
                     url: generatedVideo.url,
                 })
-                .then(() => showStatus('Wideo udostępnione pomyślnie!', 'success'))
-                .catch(error => showStatus('Udostępnianie nie powiodło się.', 'error'));
+                .then(() => showStatus('Wideo udostępnione!', 'success'))
+                .catch(error => {
+                    console.log('Share failed:', error);
+                    copyToClipboard(generatedVideo.url);
+                });
             } else {
-                navigator.clipboard.writeText(generatedVideo.url)
-                    .then(() => showStatus('Link do wideo skopiowany do schowka!', 'success'))
-                    .catch(() => showStatus('Nie udało się skopiować linku.', 'error'));
+                copyToClipboard(generatedVideo.url);
             }
         }
     });
+    
+    // Funkcja kopiowania do schowka
+    function copyToClipboard(text) {
+        navigator.clipboard.writeText(text)
+            .then(() => showStatus('Link skopiowany do schowka!', 'success'))
+            .catch(() => {
+                // Fallback dla starszych przeglądarek
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                showStatus('Link skopiowany!', 'success');
+            });
+    }
     
     // Obsługa przycisku nowego wideo
     newBtn.addEventListener('click', function() {
@@ -360,7 +460,7 @@ document.addEventListener('DOMContentLoaded', function() {
         downloadBtn.disabled = true;
         shareBtn.disabled = true;
         
-        showStatus('Wprowadź dane i kliknij "Generuj Wideo"', 'info');
+        showStatus('Gotowy do generowania nowego wideo!', 'info');
         
         document.querySelector('.input-panel').scrollIntoView({ behavior: 'smooth' });
     });
@@ -378,6 +478,10 @@ document.addEventListener('DOMContentLoaded', function() {
             case 'error':
                 icon = 'exclamation-circle';
                 color = '#f87171';
+                break;
+            case 'warning':
+                icon = 'exclamation-triangle';
+                color = '#fbbf24';
                 break;
         }
         
@@ -402,16 +506,21 @@ document.addEventListener('DOMContentLoaded', function() {
         
         let historyHTML = '';
         generationHistory.forEach(video => {
+            const shortPrompt = video.prompt.length > 40 ? 
+                video.prompt.substring(0, 40) + '...' : video.prompt;
+                
             historyHTML += `
-                <div class="history-item">
+                <div class="history-item" onclick="playHistoryVideo('${video.url}')" style="cursor:pointer;">
                     <div class="history-thumbnail">
-                        <i class="fas fa-video"></i>
+                        ${video.thumbnail ? 
+                            `<img src="${video.thumbnail}" alt="Miniatura" style="width:100%;height:100%;object-fit:cover;border-radius:5px;">` : 
+                            `<i class="fas fa-video"></i>`}
                     </div>
                     <div class="history-details">
-                        <h4>${video.prompt.substring(0, 40)}${video.prompt.length > 40 ? '...' : ''}</h4>
+                        <h4 title="${video.prompt}">${shortPrompt}</h4>
                         <p>${video.duration}s • ${video.style} • ${video.timestamp}</p>
                         <p style="color: #4cc9f0; font-size: 0.7rem; margin-top: 3px;">
-                            <i class="fas fa-server"></i> HeyGen API
+                            <i class="fas fa-server"></i> HeyGen AI
                         </p>
                     </div>
                 </div>
@@ -421,26 +530,31 @@ document.addEventListener('DOMContentLoaded', function() {
         historyList.innerHTML = historyHTML;
     }
     
-    // Przykładowe dane historii (do celów demonstracyjnych)
-    generationHistory = [
-        {
-            id: 1,
-            prompt: "Postać idzie przez magiczny las",
-            duration: "8",
-            style: "Fantasy",
-            timestamp: "2023-10-15 14:30"
-        },
-        {
-            id: 2,
-            prompt: "Animacja kota tańczącego w deszczu",
-            duration: "5",
-            style: "Animowany",
-            timestamp: "2023-10-14 11:22"
+    // Funkcja do odtwarzania wideo z historii
+    window.playHistoryVideo = function(url) {
+        if (url) {
+            videoOutput.innerHTML = `
+                <div class="video-container">
+                    <video controls autoplay style="width:100%; border-radius:10px; max-height:500px;">
+                        <source src="${url}" type="video/mp4">
+                    </video>
+                    <div style="text-align:center; margin-top:10px;">
+                        <button onclick="location.reload()" class="btn-secondary" style="padding:5px 15px;">
+                            <i class="fas fa-arrow-left"></i> Wróć
+                        </button>
+                    </div>
+                </div>
+            `;
+            showStatus('Odtwarzanie wideo z historii...', 'info');
         }
-    ];
+    };
     
-    // Inicjalizacja historii
+    // Przykładowe dane historii
+    generationHistory = [];
+    
+    // Inicjalizacja
     updateHistoryList();
+    showStatus('Aplikacja gotowa. Prześlij zdjęcie i wpisz tekst!', 'info');
     
     console.log("AI Video Generator został załadowany. Backend URL:", BACKEND_URL);
 });
