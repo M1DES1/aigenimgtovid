@@ -33,15 +33,6 @@ document.addEventListener('DOMContentLoaded', function() {
     let currentGenerationId = null;
     let statusCheckInterval = null;
     
-    // Prawidłowe głosy (muszą się zgadzać z backendem)
-    const VOICE_MAP = {
-        'realistic': 'female_en',
-        'cartoon': 'female_en',
-        'anime': 'female_en',
-        'fantasy': 'male_en',
-        'cyberpunk': 'male_en'
-    };
-    
     // Inicjalizacja
     initEventListeners();
     showStatus('Aplikacja gotowa. Prześlij zdjęcie i wpisz tekst!', 'info');
@@ -114,7 +105,7 @@ document.addEventListener('DOMContentLoaded', function() {
             
             if (promptInput.value === '') {
                 const fileNameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
-                promptInput.value = `Cześć! Jestem ${fileNameWithoutExt.replace(/[_-]/g, ' ')}.`;
+                promptInput.value = `Cześć! Nazywam się ${fileNameWithoutExt.replace(/[_-]/g, ' ')}.`;
             }
         };
         reader.readAsDataURL(file);
@@ -128,7 +119,7 @@ document.addEventListener('DOMContentLoaded', function() {
         motionValue.textContent = this.value;
     }
     
-    function handleGenerate() {
+    async function handleGenerate() {
         if (!uploadedImage) {
             showStatus('Proszę najpierw przesłać zdjęcie!', 'error');
             return;
@@ -155,7 +146,7 @@ document.addEventListener('DOMContentLoaded', function() {
         videoOutput.innerHTML = `
             <div class="video-placeholder">
                 <i class="fas fa-spinner fa-spin"></i>
-                <p>Trwa generowanie wideo...</p>
+                <p>Trwa generowanie wideo z głosem...</p>
             </div>
         `;
         
@@ -165,7 +156,7 @@ document.addEventListener('DOMContentLoaded', function() {
             updateProgress(10);
             showStatus('Rozpoczynam generowanie...', 'info');
             
-            // UŻYJ POPRAWNYCH DANYCH DLA BACKENDU
+            // WYSYŁAMY DANE DO POPRAWNEGO ENDPOINTU
             const videoData = await generateVideoWithAPI(
                 promptInput.value.trim(),
                 styleSelect.value
@@ -183,14 +174,14 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
-    // POPRAWIONA FUNKCJA - wysyła tylko dane zgodne z backendem
+    // POPRAWIONA FUNKCJA - wysyła tylko niezbędne dane
     async function generateVideoWithAPI(prompt, style) {
-        // TYLKO dane zgodne z backendem HeyGen
+        // WAŻNE: Wysyłamy tylko dane wymagane przez nowy backend
         const requestData = {
             prompt: prompt,
-            avatarId: "Abigail_expressive_2024112501", // Użyj stałego awatara
-            voiceId: VOICE_MAP[style] || 'female_en',  // Użyj mapowania głosów
+            avatarId: "Abigail_expressive_2024112501",
             dimension: "portrait"
+            // NIE wysyłamy voiceId - backend sam go pobierze z HeyGen
         };
         
         try {
@@ -205,7 +196,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 throw new Error(errorData.error || `Błąd serwera: ${response.status}`);
             }
             
-            return await response.json();
+            const result = await response.json();
+            
+            if (!result.success) {
+                throw new Error(result.error || 'Nieznany błąd backendu');
+            }
+            
+            return result;
             
         } catch (error) {
             console.error('Błąd komunikacji z backendem:', error);
@@ -244,10 +241,11 @@ document.addEventListener('DOMContentLoaded', function() {
                             url: statusData.video_url,
                             prompt: promptInput.value.trim(),
                             duration: durationSlider.value,
-                            style: styleSelect.options[styleSelect.selectedIndex].text,
+                            style: 'Z głosem',
                             timestamp: new Date().toLocaleString(),
                             videoId: videoId,
-                            thumbnail: statusData.thumbnail_url
+                            thumbnail: statusData.thumbnail_url,
+                            silent: false
                         };
                         
                         displayGeneratedVideo(statusData.video_url);
@@ -256,17 +254,17 @@ document.addEventListener('DOMContentLoaded', function() {
                         downloadBtn.disabled = false;
                         shareBtn.disabled = false;
                         
-                        showStatus('Wideo gotowe!', 'success');
+                        showStatus('Wideo z głosem gotowe!', 'success');
                         resolve();
                     }
                     else if (statusData.status === 'failed') {
                         clearInterval(statusCheckInterval);
-                        reject(new Error('Generowanie nie powiodło się'));
+                        reject(new Error('Generowanie nie powiodło się: ' + (statusData.error_message || '')));
                     }
                     
                     if (attempts >= maxAttempts) {
                         clearInterval(statusCheckInterval);
-                        reject(new Error('Przekroczono czas oczekiwania'));
+                        reject(new Error('Przekroczono czas oczekiwania na wideo'));
                     }
                     
                 } catch (error) {
@@ -285,7 +283,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     Twoja przeglądarka nie obsługuje wideo.
                 </video>
                 <div style="text-align: center; margin-top: 10px; color: #a5b4fc;">
-                    <i class="fas fa-check-circle"></i> Wideo gotowe!
+                    <i class="fas fa-check-circle"></i> Wideo z głosem gotowe!
+                    <p style="font-size: 0.8rem; margin-top: 5px; color: #94a3b8;">
+                        <i class="fas fa-volume-up"></i> Awatar mówi podany tekst
+                    </p>
                 </div>
             </div>
         `;
@@ -313,14 +314,14 @@ document.addEventListener('DOMContentLoaded', function() {
         if (generatedVideo && generatedVideo.url) {
             const link = document.createElement('a');
             link.href = generatedVideo.url;
-            link.download = `ai-video-${generatedVideo.id}.mp4`;
+            link.download = `wideo-z-glosem-${generatedVideo.id}.mp4`;
             link.target = '_blank';
             link.style.display = 'none';
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
             
-            showStatus('Pobieranie rozpoczęte!', 'success');
+            showStatus('Pobieranie wideo...', 'success');
         }
     }
     
@@ -328,8 +329,8 @@ document.addEventListener('DOMContentLoaded', function() {
         if (generatedVideo && generatedVideo.url) {
             if (navigator.share) {
                 navigator.share({
-                    title: 'Moje wideo AI',
-                    text: generatedVideo.prompt.substring(0, 100),
+                    title: 'Moje wideo AI z głosem',
+                    text: `"${generatedVideo.prompt.substring(0, 50)}..."`,
                     url: generatedVideo.url,
                 })
                 .then(() => showStatus('Udostępniono!', 'success'))
@@ -406,6 +407,10 @@ document.addEventListener('DOMContentLoaded', function() {
         
         let historyHTML = '';
         generationHistory.forEach(video => {
+            const voiceIcon = video.silent ? 
+                '<i class="fas fa-volume-mute" style="color:#94a3b8; margin-left:5px;"></i>' : 
+                '<i class="fas fa-volume-up" style="color:#4cc9f0; margin-left:5px;"></i>';
+            
             historyHTML += `
                 <div class="history-item" onclick="playHistoryVideo('${video.url}')" style="cursor:pointer;">
                     <div class="history-thumbnail">
@@ -414,7 +419,7 @@ document.addEventListener('DOMContentLoaded', function() {
                             `<i class="fas fa-video"></i>`}
                     </div>
                     <div class="history-details">
-                        <h4>${video.prompt.substring(0, 40)}${video.prompt.length > 40 ? '...' : ''}</h4>
+                        <h4>${video.prompt.substring(0, 35)}${video.prompt.length > 35 ? '...' : ''} ${voiceIcon}</h4>
                         <p>${video.duration}s • ${video.style} • ${video.timestamp}</p>
                     </div>
                 </div>
@@ -441,5 +446,15 @@ document.addEventListener('DOMContentLoaded', function() {
     generationHistory = [];
     updateHistoryList();
     
-    console.log("AI Video Generator załadowany. Backend:", BACKEND_URL);
+    console.log("AI Video Generator (Fixed Version) załadowany. Backend:", BACKEND_URL);
+    
+    // TEST: Sprawdź czy backend działa
+    fetch(`${BACKEND_URL}/health`)
+        .then(response => response.json())
+        .then(data => {
+            console.log("Backend status:", data.status);
+        })
+        .catch(err => {
+            console.warn("Nie można połączyć się z backendem:", err);
+        });
 });
